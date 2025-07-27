@@ -45,6 +45,15 @@ public class BackgroundWithBackgroundService : BackgroundService
                 if (taskCts != null && !taskCts.IsCancellationRequested)
                 {
                     //_runningTaskRegistry.AddRunningTask(request.Id, taskCts);
+                    _runningTaskRegistry.AddOrUpdateTaskStatus(request.Id, new TaskProgress
+                    {
+                        TaskId = request.Id,
+                        Status = TaskExecutionStatus.InProgress,
+                        ProgressPercentage = 10,
+                        Message = "Starting processing...",
+                        StartTime = DateTimeOffset.UtcNow,
+                        EnqueuedTime = _runningTaskRegistry.GetTaskStatus(request.Id)?.EnqueuedTime ?? DateTimeOffset.UtcNow // Preserve enqueued time
+                    });
                     _logger.LogInformation("Dequeued task ID: {id}. Processing...", request.Id);
                 }
                 else
@@ -74,13 +83,37 @@ public class BackgroundWithBackgroundService : BackgroundService
                 {
                     await workItem(taskCts.Token); // Execute the enqueued work
                 }
+                _runningTaskRegistry.AddOrUpdateTaskStatus(request.Id, new TaskProgress
+                {
+                    TaskId = request.Id,
+                    Status = TaskExecutionStatus.Completed,
+                    ProgressPercentage = 100,
+                    Message = "Task completed successfully.",
+                    EndTime = DateTimeOffset.UtcNow
+                });
             }
             catch (OperationCanceledException)
             {
+                _runningTaskRegistry.AddOrUpdateTaskStatus(request.Id, new TaskProgress
+                {
+                    TaskId = request.Id,
+                    Status = TaskExecutionStatus.Cancelled,
+                    ProgressPercentage = _runningTaskRegistry.GetTaskStatus(request.Id)?.ProgressPercentage ?? 0, // Keep last reported progress
+                    Message = "Task cancelled.",
+                    EndTime = DateTimeOffset.UtcNow
+                });
                 _logger.LogInformation("Task ID: {id} was cancelled.", request?.Id);
             }
             catch (Exception ex)
             {
+                _runningTaskRegistry.AddOrUpdateTaskStatus(request.Id, new TaskProgress
+                {
+                    TaskId = request.Id,
+                    Status = TaskExecutionStatus.Failed,
+                    ProgressPercentage = _runningTaskRegistry.GetTaskStatus(request.Id)?.ProgressPercentage ?? 0, // Keep last reported progress
+                    Message = $"Task failed: {ex.Message}",
+                    EndTime = DateTimeOffset.UtcNow
+                });
                 _logger.LogError(ex, "Error executing background work item.");
             }
             finally
