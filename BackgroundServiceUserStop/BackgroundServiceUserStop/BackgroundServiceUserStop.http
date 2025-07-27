@@ -1,0 +1,6 @@
+@BackgroundServiceUserStop_HostAddress = http://localhost:5276
+
+GET {{BackgroundServiceUserStop_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
