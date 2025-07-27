@@ -10,6 +10,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 
 builder.Services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+builder.Services.AddSingleton<IRunningTaskRegistry, RunningTaskRegistry>();
 builder.Services.AddHostedService<BackgroundWithBackgroundService>();
 
 var app = builder.Build();

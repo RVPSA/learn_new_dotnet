@@ -1,4 +1,5 @@
 using BackgroundServiceUserStop.BackgroundServices.IBackground;
+using BackgroundServiceUserStop.Models;
 
 namespace BackgroundServiceUserStop.BackgroundServices;
 
@@ -7,24 +8,51 @@ public class BackgroundWithBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly IRunningTaskRegistry _runningTaskRegistry;
     
     public BackgroundWithBackgroundService(ILogger<BackgroundWithBackgroundService> logger, 
-        IBackgroundTaskQueue backgroundTaskQueue, IServiceScopeFactory serviceScopeFactory)
+        IBackgroundTaskQueue backgroundTaskQueue, IServiceScopeFactory serviceScopeFactory,
+        IRunningTaskRegistry runningTaskRegistry)
     {
         _logger = logger;
         _backgroundTaskQueue = backgroundTaskQueue;
         _serviceScopeFactory = serviceScopeFactory;
+        _runningTaskRegistry = runningTaskRegistry;
     }
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("Data Processing Background Worker started at: {time}", DateTimeOffset.Now);
+        
+        // Register a callback for when the host is shutting down.
+        // This ensures we signal all running tasks to stop too.
+        stoppingToken.Register(() =>
+        {
+            _logger.LogInformation("Host shutdown requested. Cancelling all running tasks.");
+            _runningTaskRegistry.CancelAllTasks();
+        });
+        
         while (!stoppingToken.IsCancellationRequested)
         {
+            ProcessRequest? request = null;
             Func<CancellationToken, ValueTask>? workItem = null;
+            CancellationTokenSource? taskCts = null;
             try
             {
                 //Read workitem from queue
-                workItem = await _backgroundTaskQueue.DequeueItem(stoppingToken);
+                (request,workItem,taskCts) = await _backgroundTaskQueue.DequeueItem(stoppingToken);
+                
+                // Register this task's CTS with the registry ONLY IF it's not already cancelled
+                if (taskCts != null && !taskCts.IsCancellationRequested)
+                {
+                    //_runningTaskRegistry.AddRunningTask(request.Id, taskCts);
+                    _logger.LogInformation("Dequeued task ID: {id}. Processing...", request.Id);
+                }
+                else
+                {
+                    _logger.LogWarning("Dequeued task ID: {id} but its CancellationTokenSource was null or already cancelled. Skipping.", request?.Id);
+                    taskCts?.Dispose(); // Dispose immediately if already cancelled
+                    continue; // Skip processing this already-cancelled task
+                }
             }
             catch (OperationCanceledException)
             {
@@ -44,12 +72,26 @@ public class BackgroundWithBackgroundService : BackgroundService
                 // Create a new scope for each work item to ensure proper disposal of scoped services (e.g., DbContext)
                 using (var scope = _serviceScopeFactory.CreateScope())
                 {
-                    await workItem(stoppingToken); // Execute the enqueued work
+                    await workItem(taskCts.Token); // Execute the enqueued work
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Task ID: {id} was cancelled.", request?.Id);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error executing background work item.");
+            }
+            finally
+            {
+                // Clean up the task's CTS after it completes or is cancelled/errors out
+                taskCts?.Dispose();
+                if (request != null)
+                {
+                    _runningTaskRegistry.RemoveRunningTask(request.Id);
+                    _logger.LogInformation("Cleaned up resources for task ID: {id}.", request.Id);
+                }
             }
         }
 
