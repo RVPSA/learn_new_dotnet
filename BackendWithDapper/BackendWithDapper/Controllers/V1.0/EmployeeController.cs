@@ -3,7 +3,7 @@ using Service.Services.IService;
 
 namespace BackendWithDapper.Controllers.V1._0
 {
-    [Route("[Controller]/[Action]")]
+    [Route("[Controller]")]
     [ApiController]
     public class EmployeeController : Controller
     {
@@ -11,7 +11,7 @@ namespace BackendWithDapper.Controllers.V1._0
         public EmployeeController(IEmployeeService employeeService) {
             _employeeService = employeeService;
         }
-        [HttpGet]
+        [HttpGet("GetAllEmployee")]
         public IActionResult GetAllEmployee(int pageSize,int pageNumber) {
             try
             {
