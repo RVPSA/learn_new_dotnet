@@ -1,0 +1,6 @@
+@BackendWithEF_HostAddress = http://localhost:5156
+
+GET {{BackendWithEF_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
